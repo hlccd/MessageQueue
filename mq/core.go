@@ -26,6 +26,7 @@ type messageQueue struct {
 	lastKeep int64
 	vote     int64
 	point    string
+	inVote   bool
 	sync.RWMutex
 }
 type cores struct {
@@ -58,6 +59,7 @@ func NewCore(addrs ...string) (mq *messageQueue) {
 		lastKeep: time.Now().UnixNano(),
 		vote:     0,
 		point:    ":",
+		inVote:   false,
 	}
 	if len(addrs) != 0 {
 		for i := range addrs {
@@ -247,9 +249,9 @@ func (mq *messageQueue) redirect(conn net.Conn, sender uint8, operation uint8, t
 		}
 	}
 	mq.RUnlock()
-	if addr!=":"{
+	if addr != ":" {
 		sendMessage(conn, core, sender, ACK, addr)
-	}else if mq.master == nil {
+	} else if mq.master == nil {
 		//我是master结点
 		addr = mq.masterRedirect(conn, sender, operation, topic)
 		if addr != ":" {
@@ -443,6 +445,7 @@ func (mq *messageQueue) voteMaster() {
 	i := rand.Intn(10000)
 	time.Sleep(time.Duration(i+1000) * time.Millisecond)
 	mq.Lock()
+	mq.inVote = true
 	if mq.vote == 0 {
 		mq.master = nil
 		mq.vote = mq.id
@@ -528,8 +531,8 @@ func (mq *messageQueue) voteMaster() {
 			}
 			wg.Wait()
 			mq.list = list
-			fmt.Println("胜选后我的list:", mq.list)
 			go mq.masterKeep()
+			fmt.Println("victory list", mq.list)
 		} else {
 			//通知所有结点胜选者
 			//将胜选者设为master
@@ -562,6 +565,7 @@ func (mq *messageQueue) voteMaster() {
 			}
 		}
 	}
+	mq.inVote = false
 	mq.Unlock()
 }
 func (mq *messageQueue) listenVoter(conn net.Conn) {
@@ -789,10 +793,14 @@ func (mq *messageQueue) listenPro(conn net.Conn, topic string) {
 		if m.h.operation == PSH {
 			h := newHead(core, consume, PSH, m.h.ttl, m.h.window)
 			mes := h.createMessage(m.s)
-			mq.Lock()
-			mq.pc[topic].PushBack(mes)
-			mq.Unlock()
-			feedback(conn, core, produce, ACK)
+			if !mq.inVote {
+				mq.Lock()
+				mq.pc[topic].PushBack(mes)
+				mq.Unlock()
+				feedback(conn, core, produce, ACK)
+			} else {
+				feedback(conn, core, produce, NIL)
+			}
 		}
 	}
 }
@@ -870,10 +878,14 @@ func (mq *messageQueue) listenPub(conn net.Conn, topic string) {
 				topic: topic,
 				mes:   mes,
 			}
-			mq.Lock()
-			mq.cache.PushBack(info)
-			mq.Unlock()
-			feedback(conn, core, publish, ACK)
+			if !mq.inVote {
+				mq.Lock()
+				mq.cache.PushBack(info)
+				mq.Unlock()
+				feedback(conn, core, publish, ACK)
+			} else {
+				feedback(conn, core, produce, NIL)
+			}
 		}
 	}
 }
