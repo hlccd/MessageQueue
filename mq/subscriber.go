@@ -28,17 +28,31 @@ func (s *subscriber) Start(address string) (b bool) {
 		fmt.Println(err)
 		return false
 	}
-	s.conn = conn
-	h := newHead(subscribe, core, SYN, 1, 1)
-	mes := h.createMessage(s.topic)
-	fmt.Fprintf(s.conn, mes.string())
-	mes, err = waitMessage(s.conn)
+	sendMessage(conn, subscribe, core, GETPS, s.topic)
+	mes, err := waitMessage(conn, 10)
 	if err != nil || mes == nil {
 		return false
-	} else if mes.h.operation == ACK {
-		s.unblocked = true
-		go s.poll()
-		return true
+	}
+	if mes.h.operation == ACK {
+		addr := addressTransition(conn.RemoteAddr().String(), mes.s)
+		if addr == ":" {
+			return false
+		}
+		conn, err := net.Dial("tcp", addr)
+		if err != nil {
+			fmt.Println(err)
+			return false
+		}
+		s.conn = conn
+		sendMessage(s.conn, subscribe, core, SYN, s.topic)
+		mes, err := waitMessage(s.conn, 1)
+		if err != nil || mes == nil {
+			return false
+		} else if mes.h.operation == ACK {
+			go s.poll()
+			s.unblocked = true
+			return true
+		}
 	}
 	return false
 }

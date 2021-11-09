@@ -24,15 +24,29 @@ func (p *publisher) Start(address string) (b bool) {
 		fmt.Println(err)
 		return false
 	}
-	p.conn = conn
-	h := newHead(publish, core, SYN, 1, 0)
-	mes := h.createMessage(p.topic)
-	fmt.Fprintf(p.conn, mes.string())
-	mes, err = waitMessage(p.conn)
+	sendMessage(conn, publish, core, GETPS, p.topic)
+	mes, err := waitMessage(conn, 10)
 	if err != nil || mes == nil {
 		return false
-	} else if mes.h.operation == ACK {
-		return true
+	}
+	if mes.h.operation == ACK {
+		addr := addressTransition(conn.RemoteAddr().String(), mes.s)
+		if addr == ":" {
+			return false
+		}
+		conn, err := net.Dial("tcp", addr)
+		if err != nil {
+			fmt.Println(err)
+			return false
+		}
+		p.conn = conn
+		sendMessage(conn, publish, core, SYN, p.topic)
+		mes, err := waitMessage(p.conn, 1)
+		if err != nil || mes == nil {
+			return false
+		} else if mes.h.operation == ACK {
+			return true
+		}
 	}
 	return false
 }

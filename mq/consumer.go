@@ -22,15 +22,29 @@ func (c *consumer) Start(address string) (b bool) {
 		fmt.Println(err)
 		return false
 	}
-	c.conn = conn
-	h := newHead(consume, core, SYN, 1, 0)
-	mes := h.createMessage(c.topic)
-	fmt.Fprintf(c.conn, mes.string())
-	mes, err = waitMessage(c.conn)
+	sendMessage(conn, consume, core, GETPC, c.topic)
+	mes, err := waitMessage(conn, 10)
 	if err != nil || mes == nil {
 		return false
-	} else if mes.h.operation == ACK {
-		return true
+	}
+	if mes.h.operation == ACK {
+		addr := addressTransition(conn.RemoteAddr().String(), mes.s)
+		if addr == ":" {
+			return false
+		}
+		conn, err := net.Dial("tcp", addr)
+		if err != nil {
+			fmt.Println(err)
+			return false
+		}
+		c.conn = conn
+		sendMessage(conn, consume, core, SYN, c.topic)
+		mes, err := waitMessage(c.conn, 1)
+		if err != nil || mes == nil {
+			return false
+		} else if mes.h.operation == ACK {
+			return true
+		}
 	}
 	return false
 }
